@@ -9,9 +9,11 @@ Building
 Requirements: scons, avr-gcc & friends. The SConstruct builds and deploys with an atmega328p in mind, modify appropriately for your setup.
 
 To build the hex file:
+
     scons sht11.hex
 
 To upload:
+
     scons sht11.upload
 
 The SConstruct assumes an stk500 or equivalent at /dev/ttyACM0. Verified to work with an Arduino UNO.
