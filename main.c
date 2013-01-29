@@ -17,8 +17,8 @@
 
 typedef enum
 {
-	SHT11_MEASURE_TEMP,
-	SHT11_MEASURE_HUMIDITY,
+	SHT11_MEASURE_TEMP = 0x3, // 00000011
+	SHT11_MEASURE_HUMIDITY = 0x5, // 00000101
 } sht11_cmd_t;
 
 void uart_init(void);
@@ -26,7 +26,8 @@ void uart_putchar(char c, FILE *stream);
 char uart_getchar(FILE *stream);
 
 void sht11_trans_start(void);
-unsigned char sht11_send(sht11_cmd_t cmd);
+void sht11_send(unsigned char byte);
+unsigned char sht11_send_cmd(sht11_cmd_t cmd);
 unsigned char sht11_recv(unsigned char ack);
 void sht11_reset(void);
 
@@ -35,7 +36,7 @@ float calc_humidity(int input);
 
 int main(void)
 {
-	// Configure LED pin
+	// Configure LED pin (pin 13 on arduino uno)
 	DDRB |= (1 << DDB5);
 
 	// Configure UART
@@ -51,8 +52,9 @@ int main(void)
 	unsigned int temp, humid;
 	while(1)
 	{
-		PORTB &= ~(1 << PORTB5);
-		error = sht11_send(SHT11_MEASURE_TEMP);
+		PORTB &= ~(1 << PORTB5); // Turn LED off
+
+		error = sht11_send_cmd(SHT11_MEASURE_TEMP);
 		if(error)
 		{
 			sht11_reset();
@@ -62,7 +64,7 @@ int main(void)
 		temp |= sht11_recv(1);
 		sht11_recv(0); // Checksum
 
-		error = sht11_send(SHT11_MEASURE_HUMIDITY);
+		error = sht11_send_cmd(SHT11_MEASURE_HUMIDITY);
 		if(error)
 		{
 			sht11_reset();
@@ -76,7 +78,11 @@ int main(void)
 		float realhumid = calc_humidity(humid);
 		printf("Temp: %.2f F\tHumidity: %.2f%%\n", realtemp, realhumid);
 
-		PORTB |= (1 << PORTB5);
+		PORTB |= (1 << PORTB5); // Turn LED on
+
+		// The sensor needs to be off for a while
+		// so it doesn't heat up and throw off the
+		// measurements
 		_delay_ms(800);
 	}
 }
@@ -132,79 +138,36 @@ void sht11_trans_start(void)
 	SCK_LO();
 }
 
-// Blocks until measurement complete or error (non-zero output)
-unsigned char sht11_send(sht11_cmd_t cmd)
+void sht11_send(unsigned char byte)
 {
-	unsigned char error;
-	unsigned int i;
-
-	sht11_trans_start();
-
-	// Address (000)
-	DATA_LO();
-	for(i = 0; i < 3; i++)
+	int i;
+	for(i = 0x80; i > 0; i /= 2)
 	{
+		if(byte & i)
+		{
+			DATA_HI();
+		}
+		else
+		{
+			DATA_LO();
+		}
 		SCK_HI();
 		NOP();
 		NOP();
 		NOP();
 		SCK_LO();
 	}
-
-	// Command
-	switch(cmd)
-	{
-		case SHT11_MEASURE_TEMP: // 00011
-			for(i = 0; i < 3; i++)
-			{
-				SCK_HI();
-				NOP();
-				NOP();
-				NOP();
-				SCK_LO();
-			}
-			DATA_HI();
-			for(i = 0; i < 2; i++)
-			{
-				SCK_HI();
-				NOP();
-				NOP();
-				NOP();
-				SCK_LO();
-			}
-			break;
-		case SHT11_MEASURE_HUMIDITY: // 00101
-			for(i = 0; i < 2; i++)
-			{
-				SCK_HI();
-				NOP();
-				NOP();
-				NOP();
-				SCK_LO();
-			}
-			DATA_HI();
-			SCK_HI();
-			NOP();
-			NOP();
-			NOP();
-			SCK_LO();
-			DATA_LO();
-			SCK_HI();
-			NOP();
-			NOP();
-			NOP();
-			SCK_LO();
-			DATA_HI();
-			SCK_HI();
-			NOP();
-			NOP();
-			NOP();
-			SCK_LO();
-			break;
-		default:
-			break;
-	}
 	DATA_HI(); // Release data pin
+}
+
+// Blocks until measurement complete or error (non-zero output)
+unsigned char sht11_send_cmd(sht11_cmd_t cmd)
+{
+	unsigned char error;
+	unsigned int i;
+
+	sht11_trans_start();
+	sht11_send(cmd);
 
 	// Wait for ACK
 	SCK_HI();
@@ -255,7 +218,7 @@ unsigned char sht11_recv(unsigned char ack)
 	NOP();
 	SCK_LO();
 
-	DATA_HI();
+	DATA_HI(); // Release data pin
 
 	return ret;
 }
@@ -280,6 +243,7 @@ float calc_temp(int input)
 	return 0.018 * input - 40;
 }
 
+// Returns relative humidity in %
 float calc_humidity(int input)
 {
 	return -4 + 0.0405 * input + -2.8e-6 * pow(input, 2);
